@@ -1,0 +1,283 @@
+{
+  "name": "Monitoreo - Error Handler",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## 📊 Monitoreo - Error Handler\n\nHub central de logging para los otros 3 workflows. No corre solo — lo llaman los demás.\n\n**Dos formas de entrar:**\n- **Error Trigger**: se dispara automático cuando cualquiera de los 3 workflows falla (están configurados con este como su \"Error Workflow\" en Settings).\n- **Execute Workflow Trigger**: los 3 workflows lo llaman a propósito para reportar un evento exitoso (recordatorio enviado, compra recuperada, reactivación enviada, etc.).\n\n**Qué hace con cada evento:**\n1. Normaliza el formato (sea error o éxito) a una sola forma común\n2. Lo guarda en `automation_logs` — única tabla de monitoreo (historial completo + último estado de cada workflow)\n\nEl \"estado actual\" de cada workflow (ok/error) ya no es una tabla aparte: se calcula con la vista `v_workflow_status`, que toma la última fila de `automation_logs` por workflow.",
+        "height": 468,
+        "width": 780,
+        "color": 3
+      },
+      "id": "overviewNote",
+      "name": "📝 Qué hace este workflow",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -48,
+        -640
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "errorTrigger",
+      "name": "Error en un workflow",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -96
+      ],
+      "notes": "Se dispara automáticamente cuando cualquier workflow que lo tenga configurado como 'Error Workflow' (en Settings) falla."
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "execTrigger",
+      "name": "Recibir evento de log",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        160
+      ],
+      "notes": "Punto de entrada manual: los otros 3 workflows llaman acá con un nodo 'Execute Workflow', mandando { workflow_name, event_type, status, customer_email, entity_id, message, node_name }."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1",
+              "name": "workflow_name",
+              "type": "string",
+              "value": "={{ $json.workflow.name }}"
+            },
+            {
+              "id": "2",
+              "name": "node_name",
+              "type": "string",
+              "value": "={{ $json.execution.lastNodeExecuted }}"
+            },
+            {
+              "id": "3",
+              "name": "event_type",
+              "type": "string",
+              "value": "workflow_error"
+            },
+            {
+              "id": "4",
+              "name": "status",
+              "type": "string",
+              "value": "error"
+            },
+            {
+              "id": "5",
+              "name": "message",
+              "type": "string",
+              "value": "={{ $json.execution.error.message }}"
+            },
+            {
+              "id": "6",
+              "name": "execution_id",
+              "type": "string",
+              "value": "={{ $json.execution.id }}"
+            },
+            {
+              "id": "7",
+              "name": "customer_email",
+              "type": "string",
+              "value": ""
+            },
+            {
+              "id": "8",
+              "name": "entity_id",
+              "type": "string",
+              "value": ""
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "normalizeError",
+      "name": "Normalizar (error)",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        304,
+        -96
+      ],
+      "notes": "Convierte el payload del Error Trigger al mismo formato que usa el resto del pipeline."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1",
+              "name": "workflow_name",
+              "type": "string",
+              "value": "={{ $json.workflow_name }}"
+            },
+            {
+              "id": "2",
+              "name": "node_name",
+              "type": "string",
+              "value": "={{ $json.node_name || '' }}"
+            },
+            {
+              "id": "3",
+              "name": "event_type",
+              "type": "string",
+              "value": "={{ $json.event_type }}"
+            },
+            {
+              "id": "4",
+              "name": "status",
+              "type": "string",
+              "value": "={{ $json.status || 'success' }}"
+            },
+            {
+              "id": "5",
+              "name": "message",
+              "type": "string",
+              "value": "={{ $json.message || '' }}"
+            },
+            {
+              "id": "6",
+              "name": "execution_id",
+              "type": "string",
+              "value": "={{ $json.execution_id || '' }}"
+            },
+            {
+              "id": "7",
+              "name": "customer_email",
+              "type": "string",
+              "value": "={{ $json.customer_email || '' }}"
+            },
+            {
+              "id": "8",
+              "name": "entity_id",
+              "type": "string",
+              "value": "={{ $json.entity_id || '' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "normalizeEvent",
+      "name": "Normalizar (evento)",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        304,
+        160
+      ],
+      "notes": "Convierte el payload que mandan los workflows de negocio al mismo formato que usa el resto del pipeline."
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO automation_logs (workflow_name, node_name, event_type, status, message, execution_id, customer_email, entity_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING workflow_name, status, message",
+        "options": {
+          "queryBatching": "independently",
+          "queryReplacement": "={{ [ $json.workflow_name, $json.node_name, $json.event_type, $json.status, $json.message, $json.execution_id, $json.customer_email, $json.entity_id ] }}"
+        }
+      },
+      "id": "logEvent",
+      "name": "Registrar en automation_logs",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        608,
+        32
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "nnOMYtF34tQYfTC2",
+          "name": "Postgres account"
+        }
+      },
+      "notes": "Único lugar donde se escribe en la única tabla de monitoreo (automation_logs). Recibe eventos de error (automático) y de éxito (llamados por los otros workflows). entity_id = cart_id / order_id / customer_id según corresponda. El estado 'actual' de cada workflow se lee después desde la vista v_workflow_status (última fila por workflow_name), no hace falta un UPDATE aparte."
+    }
+  ],
+  "pinData": {
+    "Recibir evento de log": [
+      {
+        "json": {
+          "workflow_name": "Post-Purchase",
+          "event_type": "recommendation_sent",
+          "status": "success",
+          "customer_email": null,
+          "entity_id": "8cf49570-47ad-4e7a-9195-994044700b6c"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Error en un workflow": {
+      "main": [
+        [
+          {
+            "node": "Normalizar (error)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recibir evento de log": {
+      "main": [
+        [
+          {
+            "node": "Normalizar (evento)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar (error)": {
+      "main": [
+        [
+          {
+            "node": "Registrar en automation_logs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar (evento)": {
+      "main": [
+        [
+          {
+            "node": "Registrar en automation_logs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true
+  },
+  "versionId": "dd854e1a-ac0d-4b10-8030-fc8ebb28bbf7",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "38ee23dda673260744c1d583e276366dc7fe027add2b91549715a7f87ae733f9"
+  },
+  "nodeGroups": [],
+  "id": "R4v2eOi69VpEtte0",
+  "tags": []
+}

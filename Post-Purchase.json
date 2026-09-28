@@ -1,0 +1,748 @@
+{
+  "name": "Post-Purchase",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## 🎉 Post-Purchase\n\nSe dispara cuando llega la confirmación de una compra. Actualiza todo en Supabase y Brevo, y arma la secuencia de emails post-compra.\n\n**Flujo:**\n1. Marca el carrito de origen como `converted` en Supabase\n2. Calcula los totales reales (orden y carrito) por SQL, sin depender de datos mandados a mano\n3. Consulta el contacto en Brevo para saber si venía de una campaña de reactivación (`winback_sent`)\n   - Sí → lo marca `FUNNEL_STAGE = reactivated`\n   - No → lo marca `FUNNEL_STAGE = customer`\n4. Envía el email de confirmación de compra\n5. Espera 3 días → busca productos recomendados de la misma categoría que aún no compró\n6. Si hay recomendaciones → las envía por HTTP a la API de Brevo (con imágenes y precios reales)\n\nTodos los eventos se reportan a **\"Monitoreo - Error Handler\"**.",
+        "height": 540,
+        "width": 800,
+        "color": 5
+      },
+      "id": "overviewNote",
+      "name": "📝 Qué hace este workflow",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -48,
+        -656
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "purchase-completed",
+        "options": {}
+      },
+      "id": "trigger",
+      "name": "Compra Realizada (Trigger)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -48,
+        0
+      ],
+      "webhookId": "898d6d4d-daf0-49aa-a8ad-4fb31d40bb33",
+      "alwaysOutputData": false,
+      "notes": "Espera un POST con { email, name, orderId, orderTotal, items } al confirmarse una compra."
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE public.carts\nSET status = 'converted',\n    updated_at = NOW()\nWHERE id = (\n  SELECT cart_id\n  FROM public.orders\n  WHERE id = $1::uuid\n)\nRETURNING id, status;",
+        "options": {
+          "queryBatching": "independently",
+          "queryReplacement": "={{ [ $('Compra Realizada (Trigger)').item.json.body.orderId ] }}"
+        }
+      },
+      "id": "markCartConverted",
+      "name": "Marcar carrito como convertido",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        176,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "nnOMYtF34tQYfTC2",
+          "name": "Postgres account"
+        }
+      },
+      "notes": "Busca el cart_id de la orden y marca ese carrito como 'converted'. Requiere que orders.cart_id tenga el id del carrito."
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  public.orders.total AS order_total,\n  COALESCE(\n    SUM(public.cart_items.quantity * public.cart_items.unit_price),\n    0\n  ) AS cart_total\nFROM public.orders\nLEFT JOIN public.cart_items\n  ON public.cart_items.cart_id = public.orders.cart_id\nWHERE public.orders.id = $1::uuid\nGROUP BY public.orders.id, public.orders.total;",
+        "options": {
+          "queryBatching": "independently",
+          "queryReplacement": "={{ [ $('Compra Realizada (Trigger)').first().json.body.orderId ] }}"
+        }
+      },
+      "id": "getTotals",
+      "name": "Consultar totales",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        368,
+        0
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "nnOMYtF34tQYfTC2",
+          "name": "Postgres account"
+        }
+      },
+      "notes": "Calcula order_total (de orders.total) y cart_total (suma de cart_items.quantity * unit_price) en vez de depender de un valor mandado a mano por Postman."
+    },
+    {
+      "parameters": {
+        "resource": "contact",
+        "operation": "get",
+        "identifier": "={{ $('Compra Realizada (Trigger)').item.json.body.email }}",
+        "requestOptions": {}
+      },
+      "id": "getBrevoContact",
+      "name": "Consultar contacto en Brevo",
+      "type": "n8n-nodes-base.sendInBlue",
+      "typeVersion": 1,
+      "position": [
+        560,
+        0
+      ],
+      "credentials": {
+        "sendInBlueApi": {
+          "id": "7P242ip6wmwOs29A",
+          "name": "Brevo account"
+        }
+      },
+      "notes": "Trae los atributos actuales del contacto, para saber si estaba en estado 'winback_sent' (le mandamos la campaña de reactivación)."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.attributes.FUNNEL_STAGE }}",
+              "rightValue": "winback_sent",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ifWinback",
+      "name": "¿FUNNEL_STAGE es winback_sent?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        752,
+        0
+      ],
+      "notes": "Compara el FUNNEL_STAGE que tenía el contacto en Brevo ANTES de esta compra. Si era 'winback_sent' → esta compra es una reactivación. Si no (vacío, cart_abandoned, customer, etc.) → es una compra normal."
+    },
+    {
+      "parameters": {
+        "resource": "contact",
+        "operation": "upsert",
+        "email": "={{ $('Compra Realizada (Trigger)').item.json.body.email }}",
+        "upsertAttributes": {
+          "upsertAttributesValues": [
+            {
+              "fieldName": "FUNNEL_STAGE",
+              "fieldValue": "reactivated"
+            }
+          ]
+        },
+        "requestOptions": {}
+      },
+      "id": "setReactivatedStage",
+      "name": "Actualizar a reactivated",
+      "type": "n8n-nodes-base.sendInBlue",
+      "typeVersion": 1,
+      "position": [
+        928,
+        -96
+      ],
+      "credentials": {
+        "sendInBlueApi": {
+          "id": "7P242ip6wmwOs29A",
+          "name": "Brevo account"
+        }
+      },
+      "notes": "El cliente había recibido la campaña de reactivación (winback_sent) y ahora compró: se marca como reactivado."
+    },
+    {
+      "parameters": {
+        "resource": "contact",
+        "operation": "upsert",
+        "email": "={{ $('Compra Realizada (Trigger)').item.json.body.email }}",
+        "upsertAttributes": {
+          "upsertAttributesValues": [
+            {
+              "fieldName": "FUNNEL_STAGE",
+              "fieldValue": "customer"
+            }
+          ]
+        },
+        "requestOptions": {}
+      },
+      "id": "setCustomerStage",
+      "name": "Actualizar a customer",
+      "type": "n8n-nodes-base.sendInBlue",
+      "typeVersion": 1,
+      "position": [
+        928,
+        112
+      ],
+      "credentials": {
+        "sendInBlueApi": {
+          "id": "7P242ip6wmwOs29A",
+          "name": "Brevo account"
+        }
+      },
+      "notes": "Compra normal, sin haber pasado por reactivación: se marca como customer."
+    },
+    {
+      "parameters": {
+        "resource": "contact",
+        "operation": "upsert",
+        "email": "={{ $('Compra Realizada (Trigger)').item.json.body.email }}",
+        "upsertAttributes": {
+          "upsertAttributesValues": [
+            {
+              "fieldName": "CART_TOTAL",
+              "fieldValue": "={{ $('Consultar totales').first().json.cart_total }}"
+            },
+            {
+              "fieldName": "ORDER_TOTAL",
+              "fieldValue": "={{ $('Consultar totales').first().json.order_total }}"
+            }
+          ]
+        },
+        "requestOptions": {}
+      },
+      "id": "updateContact",
+      "name": "Actualizar datos y segmento",
+      "type": "n8n-nodes-base.sendInBlue",
+      "typeVersion": 1,
+      "position": [
+        1184,
+        0
+      ],
+      "credentials": {
+        "sendInBlueApi": {
+          "id": "7P242ip6wmwOs29A",
+          "name": "Brevo account"
+        }
+      },
+      "notes": "Create or Update: no falla si el contacto ya existe. CART_TOTAL y ORDER_TOTAL vienen calculados por Postgres."
+    },
+    {
+      "parameters": {
+        "operation": "sendTemplate",
+        "templateId": 3,
+        "receipients": "={{ $('Compra Realizada (Trigger)').item.json.body.email }}",
+        "additionalFields": {},
+        "requestOptions": {}
+      },
+      "id": "sendPostPurchase",
+      "name": "Enviar email post-compra",
+      "type": "n8n-nodes-base.sendInBlue",
+      "typeVersion": 1,
+      "position": [
+        1424,
+        0
+      ],
+      "credentials": {
+        "sendInBlueApi": {
+          "id": "7P242ip6wmwOs29A",
+          "name": "Brevo account"
+        }
+      },
+      "notes": "Completar templateId con la plantilla de confirmación de compra en Brevo."
+    },
+    {
+      "parameters": {
+        "amount": 3,
+        "unit": "days"
+      },
+      "id": "wait1",
+      "name": "Esperar 3 días",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1680,
+        0
+      ],
+      "webhookId": "0b4e99a6-3a9b-4a92-80b9-9cbd49cd2c97",
+      "notes": "Tiempo antes de enviar la recomendación post-compra. Ajustable."
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH datos_de_orden AS (\n  SELECT\n    orders.id AS order_id,\n    customers.email,\n    customers.first_name,\n    orders.total AS order_total\n  FROM public.orders AS orders\n  JOIN public.customers AS customers\n    ON customers.id = orders.customer_id\n  WHERE orders.id = $1::uuid\n),\n\ncategorias_compradas AS (\n  SELECT DISTINCT\n    products.category\n  FROM public.order_items AS order_items\n  JOIN datos_de_orden\n    ON datos_de_orden.order_id = order_items.order_id\n  JOIN public.products AS products\n    ON products.id = order_items.product_id\n  WHERE order_items.product_id IS NOT NULL\n),\n\nproductos_recomendados AS (\n  SELECT\n    products.product_name,\n    products.price,\n    products.image_url,\n    ROW_NUMBER() OVER (\n      ORDER BY products.product_name\n    ) AS posicion\n  FROM public.products AS products\n  WHERE products.active = true\n    AND products.stock > 0\n    AND products.category IN (\n      SELECT categorias_compradas.category\n      FROM categorias_compradas\n    )\n    AND NOT EXISTS (\n      SELECT 1\n      FROM public.order_items AS order_items\n      JOIN datos_de_orden\n        ON datos_de_orden.order_id = order_items.order_id\n      WHERE order_items.product_id = products.id\n    )\n)\n\nSELECT\n  datos_de_orden.email,\n  datos_de_orden.first_name,\n  datos_de_orden.order_total,\n  COALESCE(\n    (\n      SELECT JSONB_AGG(\n        JSONB_BUILD_OBJECT(\n          'name', productos_recomendados.product_name,\n          'price', productos_recomendados.price,\n          'image_url', productos_recomendados.image_url\n        )\n        ORDER BY productos_recomendados.posicion\n      )\n      FROM productos_recomendados\n      WHERE productos_recomendados.posicion <= 3\n    ),\n    '[]'::jsonb\n  ) AS recommendations\nFROM datos_de_orden;\n\n",
+        "options": {
+          "queryBatching": "independently",
+          "queryReplacement": "={{ $('Compra Realizada (Trigger)').item.json.body.orderId }}"
+        }
+      },
+      "id": "getOrderProducts",
+      "name": "Consultar productos de la orden",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1920,
+        0
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "nnOMYtF34tQYfTC2",
+          "name": "Postgres account"
+        }
+      },
+      "notes": "Trae email, first_name, order_total y recommendations (array jsonb de hasta 3 productos de la misma categoría que aún no compró)."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.recommendations.length > 0 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ifHasRecommendations",
+      "name": "¿Hay recomendaciones?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2128,
+        0
+      ],
+      "notes": "Chequea si el array 'recommendations' de la query anterior tiene al menos 1 producto. Si está vacío, no tiene sentido llamar a Brevo para un email sin productos."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.brevo.com/v3/smtp/email",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "sendInBlueApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n  {\n    to: [{ email: $json.email }],\n    templateId: 4,\n    params: {\n      FIRST_NAME: $json.first_name,\n      recommendations: $json.recommendations\n    }\n  }\n}}",
+        "options": {}
+      },
+      "id": "sendRecommendationHttp",
+      "name": "Enviar recomendación (HTTP Brevo)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2432,
+        -144
+      ],
+      "credentials": {
+        "sendInBlueApi": {
+          "id": "7P242ip6wmwOs29A",
+          "name": "Brevo account"
+        }
+      },
+      "notes": "Llama directo a la API de Brevo (POST /v3/smtp/email) para poder mandar 'recommendations' como array real en los params de la plantilla. Solo se ejecuta si hay al menos 1 recomendación."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1",
+              "name": "workflow_name",
+              "type": "string",
+              "value": "={{ $workflow.name }}"
+            },
+            {
+              "id": "2",
+              "name": "event_type",
+              "type": "string",
+              "value": "recommendation_sent"
+            },
+            {
+              "id": "3",
+              "name": "status",
+              "type": "string",
+              "value": "success"
+            },
+            {
+              "id": "4",
+              "name": "customer_email",
+              "type": "string",
+              "value": "={{ $json.email }}"
+            },
+            {
+              "id": "5",
+              "name": "entity_id",
+              "type": "string",
+              "value": "={{ $('Compra Realizada (Trigger)').item.json.body.orderId }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "setRecommendationSent",
+      "name": "Preparar log: Recomendación enviada",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2720,
+        -144
+      ],
+      "notes": "Arma el evento 'recommendation_sent' para el workflow central de logging."
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "R4v2eOi69VpEtte0",
+          "cachedResultName": "Monitoreo - Error Handler"
+        },
+        "mode": "each",
+        "options": {}
+      },
+      "id": "execRecommendationSent",
+      "name": "Registrar: Recomendación enviada",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        3024,
+        -144
+      ],
+      "notes": "Llama al workflow central de logging."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1",
+              "name": "workflow_name",
+              "type": "string",
+              "value": "={{ $workflow.name }}"
+            },
+            {
+              "id": "2",
+              "name": "event_type",
+              "type": "string",
+              "value": "no_recommendations"
+            },
+            {
+              "id": "3",
+              "name": "status",
+              "type": "string",
+              "value": "success"
+            },
+            {
+              "id": "4",
+              "name": "customer_email",
+              "type": "string",
+              "value": "={{ $json.email }}"
+            },
+            {
+              "id": "5",
+              "name": "entity_id",
+              "type": "string",
+              "value": "={{ $('Compra Realizada (Trigger)').item.json.body.orderId }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "setNoRecommendations",
+      "name": "Preparar log: Sin recomendaciones",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2432,
+        160
+      ],
+      "notes": "Arma el evento 'no_recommendations' (no había productos de la misma categoría, sin stock, o inactivos) para el workflow central de logging."
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "R4v2eOi69VpEtte0",
+          "cachedResultName": "Monitoreo - Error Handler"
+        },
+        "mode": "each",
+        "options": {}
+      },
+      "id": "execNoRecommendations",
+      "name": "Registrar: Sin recomendaciones",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        2720,
+        160
+      ],
+      "notes": "Llama al workflow central de logging. No había productos recomendables (sin categoría coincidente, sin stock o inactivos)."
+    }
+  ],
+  "pinData": {
+    "Compra Realizada (Trigger)": [
+      {
+        "json": {
+          "headers": {
+            "host": "n8n.my-n8n-automation.uk",
+            "user-agent": "PostmanRuntime/2.7.0",
+            "content-length": "98",
+            "accept": "*/*",
+            "accept-encoding": "gzip, br",
+            "cache-control": "no-cache",
+            "cdn-loop": "cloudflare; loops=1",
+            "cf-connecting-ip": "181.9.209.31",
+            "cf-ipcountry": "AR",
+            "cf-ray": "a41f7d28ac678f28-EZE",
+            "cf-visitor": "{\"scheme\":\"https\"}",
+            "cf-warp-tag-id": "6de6e224-0a13-4438-b1ef-e588edf5c226",
+            "connection": "keep-alive",
+            "content-type": "application/json",
+            "cookie": "CF_AppSession=9f5726809b8ed775",
+            "postman-token": "870f58ce-cdbd-4c69-aa07-62b5776b9a37",
+            "x-forwarded-for": "181.9.209.31",
+            "x-forwarded-proto": "https"
+          },
+          "params": {},
+          "query": {},
+          "body": {
+            "orderId": "8cf49570-47ad-4e7a-9195-994044700b6c",
+            "email": "ani.fb95+carrito01@gmail.com"
+          },
+          "webhookUrl": "https://n8n.my-n8n-automation.uk/webhook/purchase-completed",
+          "executionMode": "production"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Compra Realizada (Trigger)": {
+      "main": [
+        [
+          {
+            "node": "Marcar carrito como convertido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marcar carrito como convertido": {
+      "main": [
+        [
+          {
+            "node": "Consultar totales",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consultar totales": {
+      "main": [
+        [
+          {
+            "node": "Consultar contacto en Brevo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consultar contacto en Brevo": {
+      "main": [
+        [
+          {
+            "node": "¿FUNNEL_STAGE es winback_sent?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿FUNNEL_STAGE es winback_sent?": {
+      "main": [
+        [
+          {
+            "node": "Actualizar a reactivated",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Actualizar a customer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Actualizar a reactivated": {
+      "main": [
+        [
+          {
+            "node": "Actualizar datos y segmento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Actualizar a customer": {
+      "main": [
+        [
+          {
+            "node": "Actualizar datos y segmento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Actualizar datos y segmento": {
+      "main": [
+        [
+          {
+            "node": "Enviar email post-compra",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar email post-compra": {
+      "main": [
+        [
+          {
+            "node": "Esperar 3 días",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Esperar 3 días": {
+      "main": [
+        [
+          {
+            "node": "Consultar productos de la orden",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consultar productos de la orden": {
+      "main": [
+        [
+          {
+            "node": "¿Hay recomendaciones?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Hay recomendaciones?": {
+      "main": [
+        [
+          {
+            "node": "Enviar recomendación (HTTP Brevo)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar log: Sin recomendaciones",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar recomendación (HTTP Brevo)": {
+      "main": [
+        [
+          {
+            "node": "Preparar log: Recomendación enviada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar log: Recomendación enviada": {
+      "main": [
+        [
+          {
+            "node": "Registrar: Recomendación enviada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar log: Sin recomendaciones": {
+      "main": [
+        [
+          {
+            "node": "Registrar: Sin recomendaciones",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true,
+    "errorWorkflow": "R4v2eOi69VpEtte0"
+  },
+  "versionId": "2bcf6c1a-9365-4564-ba6f-ad880179c75c",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "38ee23dda673260744c1d583e276366dc7fe027add2b91549715a7f87ae733f9"
+  },
+  "nodeGroups": [],
+  "id": "3zIf40P1ubEkJL6I",
+  "tags": []
+}

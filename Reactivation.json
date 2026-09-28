@@ -1,0 +1,465 @@
+{
+  "name": "Reactivation",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## 🔁 Reactivation\n\nCorre todos los días a las 9am. Busca clientes que no compran hace 90+ días y les manda una campaña para que vuelvan.\n\n**Flujo:**\n1. Registra que el cron corrió hoy (aunque no encuentre a nadie)\n2. Busca en Supabase clientes inactivos (90+ días sin comprar, con `marketing_opt_in = true`, que no recibieron ya la campaña)\n3. Actualiza sus datos en Brevo\n4. Envía la campaña de reactivación\n5. Marca `reactivation_sent_at` en Supabase (para que nunca la reciban 2 veces)\n6. Marca `FUNNEL_STAGE = winback_sent` en Brevo — así Post-Purchase puede detectar si esta persona vuelve a comprar\n\nTodos los eventos se reportan a **\"Monitoreo - Error Handler\"**.",
+        "height": 504,
+        "width": 780,
+        "color": 6
+      },
+      "id": "overviewNote",
+      "name": "📝 Qué hace este workflow",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        -560
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "id": "trigger",
+      "name": "Disparador diario",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -80,
+        16
+      ],
+      "notes": "Corre todos los días a las 9:00 (hora del servidor/timezone del workflow)."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1",
+              "name": "workflow_name",
+              "type": "string",
+              "value": "={{ $workflow.name }}"
+            },
+            {
+              "id": "2",
+              "name": "event_type",
+              "type": "string",
+              "value": "daily_check"
+            },
+            {
+              "id": "3",
+              "name": "status",
+              "type": "string",
+              "value": "success"
+            },
+            {
+              "id": "4",
+              "name": "customer_email",
+              "type": "string",
+              "value": ""
+            },
+            {
+              "id": "5",
+              "name": "entity_id",
+              "type": "string",
+              "value": ""
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "setDailyCheck",
+      "name": "Preparar log: Chequeo diario",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        192,
+        16
+      ],
+      "notes": "Arma el evento 'daily_check' (sin email ni entity_id, es a nivel del workflow entero). Confirma que el cron corrió hoy, haya o no clientes para reactivar."
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "R4v2eOi69VpEtte0",
+          "cachedResultName": "Monitoreo - Error Handler"
+        },
+        "mode": "each",
+        "options": {}
+      },
+      "id": "execDailyCheck",
+      "name": "Registrar: Chequeo diario",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        432,
+        16
+      ],
+      "notes": "Llama al workflow central de logging. Confirma que el cron corrió, haya o no clientes para reactivar."
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, email, first_name, last_name\nFROM customers\nWHERE (last_purchase_at IS NULL OR last_purchase_at < NOW() - INTERVAL '90 days')\n  AND reactivation_sent_at IS NULL\n  AND marketing_opt_in = true",
+        "options": {
+          "queryBatching": "independently"
+        }
+      },
+      "id": "findInactive",
+      "name": "Buscar clientes inactivos (90 días)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        672,
+        16
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "nnOMYtF34tQYfTC2",
+          "name": "Postgres account"
+        }
+      },
+      "notes": "Usa columnas reales de Supabase. Filtra por marketing_opt_in = true para respetar el consentimiento de marketing."
+    },
+    {
+      "parameters": {
+        "resource": "contact",
+        "operation": "upsert",
+        "email": "={{ $json.email }}",
+        "upsertAttributes": {
+          "upsertAttributesValues": [
+            {
+              "fieldName": "NOMBRE",
+              "fieldValue": "={{ $json.first_name }}"
+            },
+            {
+              "fieldName": "APELLIDOS",
+              "fieldValue": "={{ $json.last_name }}"
+            }
+          ]
+        },
+        "requestOptions": {}
+      },
+      "id": "updateBrevoSegment",
+      "name": "Actualizar segmento Brevo",
+      "type": "n8n-nodes-base.sendInBlue",
+      "typeVersion": 1,
+      "position": [
+        912,
+        16
+      ],
+      "credentials": {
+        "sendInBlueApi": {
+          "id": "7P242ip6wmwOs29A",
+          "name": "Brevo account"
+        }
+      },
+      "notes": "Create or Update: no falla si el contacto ya existe en Brevo."
+    },
+    {
+      "parameters": {
+        "operation": "sendTemplate",
+        "templateId": 2,
+        "receipients": "={{ $('Buscar clientes inactivos (90 días)').item.json.email }}",
+        "additionalFields": {
+          "templateParameters": {
+            "parameterValues": {
+              "parameters": "=first_name = {{ $('Buscar clientes inactivos (90 días)').item.json.first_name }}"
+            }
+          }
+        },
+        "requestOptions": {}
+      },
+      "id": "sendCampaign",
+      "name": "Enviar campaña de reactivación",
+      "type": "n8n-nodes-base.sendInBlue",
+      "typeVersion": 1,
+      "position": [
+        1152,
+        16
+      ],
+      "credentials": {
+        "sendInBlueApi": {
+          "id": "7P242ip6wmwOs29A",
+          "name": "Brevo account"
+        }
+      },
+      "notes": "Completar templateId con la plantilla de reactivación en Brevo."
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE public.customers\nSET reactivation_sent_at = NOW()\nWHERE id = $1\nRETURNING id, email, reactivation_sent_at;",
+        "options": {
+          "queryBatching": "independently",
+          "queryReplacement": "={{ $('Buscar clientes inactivos (90 días)').item.json.id }}"
+        }
+      },
+      "id": "markSent",
+      "name": "Marcar como enviado",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1392,
+        16
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "nnOMYtF34tQYfTC2",
+          "name": "Postgres account"
+        }
+      },
+      "notes": "Marca reactivation_sent_at por id de cliente para que nunca vuelva a recibir la campaña (envío único)."
+    },
+    {
+      "parameters": {
+        "resource": "contact",
+        "operation": "upsert",
+        "email": "={{ $('Buscar clientes inactivos (90 días)').item.json.email }}",
+        "upsertAttributes": {
+          "upsertAttributesValues": [
+            {
+              "fieldName": "FUNNEL_STAGE",
+              "fieldValue": "winback_sent"
+            }
+          ]
+        },
+        "requestOptions": {}
+      },
+      "id": "setWinbackStage",
+      "name": "Actualizar FUNNEL_STAGE en Brevo",
+      "type": "n8n-nodes-base.sendInBlue",
+      "typeVersion": 1,
+      "position": [
+        1632,
+        16
+      ],
+      "credentials": {
+        "sendInBlueApi": {
+          "id": "7P242ip6wmwOs29A",
+          "name": "Brevo account"
+        }
+      },
+      "notes": "Guarda que a este cliente ya se le mandó la campaña de reactivación (winback_sent). Post-Purchase usa este valor para detectar clientes reactivados."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1",
+              "name": "workflow_name",
+              "type": "string",
+              "value": "={{ $workflow.name }}"
+            },
+            {
+              "id": "2",
+              "name": "event_type",
+              "type": "string",
+              "value": "reactivation_sent"
+            },
+            {
+              "id": "3",
+              "name": "status",
+              "type": "string",
+              "value": "success"
+            },
+            {
+              "id": "4",
+              "name": "customer_email",
+              "type": "string",
+              "value": "={{ $('Buscar clientes inactivos (90 días)').item.json.email }}"
+            },
+            {
+              "id": "5",
+              "name": "entity_id",
+              "type": "string",
+              "value": "={{ $('Buscar clientes inactivos (90 días)').item.json.id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "setReactivationSent",
+      "name": "Preparar log: Reactivación enviada",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1872,
+        16
+      ],
+      "notes": "Arma el evento 'reactivation_sent' (email + id del cliente) para el workflow central de logging."
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "R4v2eOi69VpEtte0",
+          "cachedResultName": "Monitoreo - Error Handler"
+        },
+        "mode": "each",
+        "options": {}
+      },
+      "id": "execReactivationSent",
+      "name": "Registrar: Reactivación enviada",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        2112,
+        16
+      ],
+      "notes": "Llama al workflow central de logging."
+    }
+  ],
+  "pinData": {
+    "Disparador diario": [
+      {
+        "json": {
+          "timestamp": "2026-09-27T21:29:09.794-04:00",
+          "Readable date": "September 27th 2026, 9:29:09 pm",
+          "Readable time": "9:29:09 pm",
+          "Day of week": "Sunday",
+          "Year": "2026",
+          "Month": "September",
+          "Day of month": "27",
+          "Hour": "21",
+          "Minute": "29",
+          "Second": "09",
+          "Timezone": "America/New_York (UTC-04:00)"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Disparador diario": {
+      "main": [
+        [
+          {
+            "node": "Preparar log: Chequeo diario",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar log: Chequeo diario": {
+      "main": [
+        [
+          {
+            "node": "Registrar: Chequeo diario",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar: Chequeo diario": {
+      "main": [
+        [
+          {
+            "node": "Buscar clientes inactivos (90 días)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar clientes inactivos (90 días)": {
+      "main": [
+        [
+          {
+            "node": "Actualizar segmento Brevo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Actualizar segmento Brevo": {
+      "main": [
+        [
+          {
+            "node": "Enviar campaña de reactivación",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar campaña de reactivación": {
+      "main": [
+        [
+          {
+            "node": "Marcar como enviado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marcar como enviado": {
+      "main": [
+        [
+          {
+            "node": "Actualizar FUNNEL_STAGE en Brevo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Actualizar FUNNEL_STAGE en Brevo": {
+      "main": [
+        [
+          {
+            "node": "Preparar log: Reactivación enviada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar log: Reactivación enviada": {
+      "main": [
+        [
+          {
+            "node": "Registrar: Reactivación enviada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true,
+    "errorWorkflow": "R4v2eOi69VpEtte0"
+  },
+  "versionId": "dfc965b8-dd9f-4ecf-a1ed-16c727a7c0ba",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "38ee23dda673260744c1d583e276366dc7fe027add2b91549715a7f87ae733f9"
+  },
+  "nodeGroups": [],
+  "id": "w1v7PJeeCkOi0O4q",
+  "tags": []
+}

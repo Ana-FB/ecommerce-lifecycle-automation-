@@ -1,0 +1,808 @@
+{
+  "name": "Abandoned Cart",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## 🛒 Abandoned Cart\n\nCuando se crea un carrito sin comprar, este workflow intenta recuperarlo con hasta 2 recordatorios por email.\n\n**Flujo:**\n1. Espera 1h → consulta el carrito en Supabase\n2. Si ya estaba `converted` (compró solo, antes de cualquier email) → termina y registra `already_converted` (NO es una recuperación, nunca se mandó recordatorio)\n3. Si sigue `active` → actualiza el contacto en Brevo (`FUNNEL_STAGE = cart_abandoned`) y manda el 1er recordatorio\n4. Espera 48h más → vuelve a consultar el mismo carrito\n5. Si ahora convirtió → termina y registra `purchase_recovered` (esta sí es una recuperación real, el carrito estuvo `active` y el recordatorio pudo haber ayudado). Si no → manda el 2do recordatorio\n\nTodos los eventos se reportan al workflow **\"Monitoreo - Error Handler\"** para las métricas de efectividad y el funnel en Looker Studio.",
+        "height": 516,
+        "width": 892,
+        "color": 4
+      },
+      "id": "overviewNote",
+      "name": "📝 Qué hace este workflow",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -48,
+        -704
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "abandoned-cart",
+        "options": {}
+      },
+      "id": "trigger",
+      "name": "Carrito Abandonado (Trigger)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "bdb99743-9b45-4348-982c-1908950a04f9",
+      "notes": "Espera un POST con { orderId, email, name, cartUrl, items }. orderId = id (uuid) del registro en la tabla orders con status='cart'."
+    },
+    {
+      "parameters": {
+        "amount": 1,
+        "unit": "hours"
+      },
+      "id": "wait1",
+      "name": "Esperar 1 hora",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        304,
+        0
+      ],
+      "webhookId": "f1313de3-5861-45c9-a060-21d76921c1b9",
+      "notes": "Tiempo de espera antes de revisar si hubo compra. Ajustable (ej. 3h, 24h) según la estrategia."
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  -- Datos del carrito y del cliente\n  public.carts.status AS cart_status,\n  public.customers.first_name,\n  public.customers.last_name,\n  public.customers.email,\n\n  -- Lista los productos que hay en el carrito\n  COALESCE(\n    STRING_AGG(\n      CONCAT(\n        public.cart_items.product_name,\n        ' x',\n        public.cart_items.quantity,\n        ' — $',\n        TO_CHAR(\n          public.cart_items.quantity * public.cart_items.unit_price,\n          'FM999999990.00'\n        )\n      ),\n      E'\\n'\n      ORDER BY public.cart_items.product_name\n    ),\n    'Sin productos'\n  ) AS cart_details,\n\n  -- Suma el precio de todos los productos del carrito\n  COALESCE(\n    SUM(public.cart_items.quantity * public.cart_items.unit_price),\n    0\n  ) AS cart_total\n\nFROM public.carts\n\n-- Busca quién es el dueño del carrito\nJOIN public.customers\n  ON public.customers.id = public.carts.customer_id\n\n-- Busca los productos guardados en ese carrito\nLEFT JOIN public.cart_items\n  ON public.cart_items.cart_id = public.carts.id\n\n-- $1 debe ser el ID del carrito\nWHERE public.carts.id = $1::uuid\n\nGROUP BY\n  public.carts.id,\n  public.carts.status,\n  public.customers.first_name,\n  public.customers.last_name,\n  public.customers.email;",
+        "options": {
+          "queryBatching": "independently",
+          "queryReplacement": "={{ [ $('Carrito Abandonado (Trigger)').item.json.body.cartId ] }}"
+        }
+      },
+      "id": "checkOrder",
+      "name": "Verificar si hubo compra",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        608,
+        0
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "nnOMYtF34tQYfTC2",
+          "name": "Postgres account"
+        }
+      },
+      "notes": "Usa la tabla carts/customers/cart_items real. Se busca el carrito por su id."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.cart_status }}",
+              "rightValue": "converted",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ifPurchased",
+      "name": "¿Hubo compra?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        912,
+        0
+      ],
+      "notes": "Compara cart_status contra 'converted'. Sí → ya estaba convertido ANTES de mandar cualquier email (no es una recuperación, termina). No (sigue 'active') → sigue al 1er recordatorio."
+    },
+    {
+      "parameters": {
+        "resource": "contact",
+        "operation": "upsert",
+        "email": "={{ $json.email }}",
+        "upsertAttributes": {
+          "upsertAttributesValues": [
+            {
+              "fieldName": "NOMBRE",
+              "fieldValue": "={{ $json.first_name }}"
+            },
+            {
+              "fieldName": "APELLIDOS",
+              "fieldValue": "={{ $json.last_name }}"
+            },
+            {
+              "fieldName": "CART_TOTAL",
+              "fieldValue": "={{ $json.cart_total }}"
+            },
+            {
+              "fieldName": "FUNNEL_STAGE",
+              "fieldValue": "cart_abandoned"
+            }
+          ]
+        },
+        "requestOptions": {}
+      },
+      "id": "updateBrevoSegment",
+      "name": "Actualizar segmento Brevo",
+      "type": "n8n-nodes-base.sendInBlue",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        -176
+      ],
+      "credentials": {
+        "sendInBlueApi": {
+          "id": "7P242ip6wmwOs29A",
+          "name": "Brevo account"
+        }
+      },
+      "notes": "Create or Update. FUNNEL_STAGE = cart_abandoned reemplaza a STATUS_CART como atributo único de etapa del funnel."
+    },
+    {
+      "parameters": {
+        "operation": "sendTemplate",
+        "templateId": 1,
+        "receipients": "={{ $('Carrito Abandonado (Trigger)').item.json.body.email }}",
+        "additionalFields": {
+          "templateParameters": {
+            "parameterValues": {
+              "parameters": "=FIRSTNAME={{ $('Verificar si hubo compra').item.json.first_name }}"
+            }
+          }
+        },
+        "requestOptions": {}
+      },
+      "id": "sendReminder",
+      "name": "Enviar recordatorio",
+      "type": "n8n-nodes-base.sendInBlue",
+      "typeVersion": 1,
+      "position": [
+        1504,
+        -176
+      ],
+      "credentials": {
+        "sendInBlueApi": {
+          "id": "7P242ip6wmwOs29A",
+          "name": "Brevo account"
+        }
+      },
+      "notes": "Primer email de recordatorio (templateId=1)."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1",
+              "name": "workflow_name",
+              "type": "string",
+              "value": "={{ $workflow.name }}"
+            },
+            {
+              "id": "2",
+              "name": "event_type",
+              "type": "string",
+              "value": "reminder_sent"
+            },
+            {
+              "id": "3",
+              "name": "status",
+              "type": "string",
+              "value": "success"
+            },
+            {
+              "id": "4",
+              "name": "customer_email",
+              "type": "string",
+              "value": "={{ $('Carrito Abandonado (Trigger)').item.json.body.email }}"
+            },
+            {
+              "id": "5",
+              "name": "entity_id",
+              "type": "string",
+              "value": "={{ $('Carrito Abandonado (Trigger)').item.json.body.cartId }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "setReminder1",
+      "name": "Preparar log: Recordatorio enviado",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1808,
+        -176
+      ],
+      "notes": "Arma el evento 'reminder_sent' (email + cartId) para mandarlo al workflow central de logging."
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "R4v2eOi69VpEtte0",
+          "cachedResultName": "Monitoreo - Error Handler"
+        },
+        "mode": "each",
+        "options": {}
+      },
+      "id": "execReminder1",
+      "name": "Registrar: Recordatorio enviado",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        2112,
+        -176
+      ],
+      "notes": "Llama al workflow central de logging (registra el evento y actualiza workflow_status)."
+    },
+    {
+      "parameters": {
+        "amount": 48,
+        "unit": "hours"
+      },
+      "id": "wait2",
+      "name": "Esperar 48 horas",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2400,
+        -176
+      ],
+      "webhookId": "f7daf93b-3971-4daa-b8e2-4cc123472942",
+      "notes": "Espera antes del segundo intento de recordatorio."
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  ca.status AS cart_status,\n  cu.first_name,\n  cu.last_name,\n  cu.email,\n  COALESCE(\n    string_agg(\n      ci.product_name || ' x' || ci.quantity || ' — $' ||\n      to_char(ci.quantity * ci.unit_price, 'FM999999990.00'),\n      E'\\n'\n      ORDER BY ci.product_name\n    ),\n    'Sin productos'\n  ) AS order_details,\n  COALESCE(SUM(ci.quantity * ci.unit_price), 0) AS cart_total\nFROM public.carts ca\nJOIN public.customers cu ON cu.id = ca.customer_id\nLEFT JOIN public.cart_items ci ON ci.cart_id = ca.id\nWHERE ca.id = $1::uuid\nGROUP BY ca.id, ca.status, cu.first_name, cu.last_name, cu.email;",
+        "options": {
+          "queryBatching": "independently",
+          "queryReplacement": "={{ [$('Carrito Abandonado (Trigger)').item.json.body.cartId] }}"
+        }
+      },
+      "id": "checkOrder2",
+      "name": "Verificar si hubo compra (2do intento)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2704,
+        -176
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "nnOMYtF34tQYfTC2",
+          "name": "Postgres account"
+        }
+      },
+      "notes": "Segunda consulta del carrito, 48h después del primer email."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.cart_status }}",
+              "rightValue": "converted",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ifPurchased2",
+      "name": "¿Hubo compra? (2do intento)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        3008,
+        -176
+      ],
+      "notes": "Mismo chequeo que el primer If, pero 48h después del 1er recordatorio. Sí → se convirtió mientras esperaba (recuperación real), termina. No → manda el 2do recordatorio."
+    },
+    {
+      "parameters": {
+        "operation": "sendTemplate",
+        "templateId": 1,
+        "receipients": "={{ $('Carrito Abandonado (Trigger)').item.json.body.email }}",
+        "additionalFields": {
+          "templateParameters": {
+            "parameterValues": {
+              "parameters": "=FIRSTNAME={{ $('Verificar si hubo compra (2do intento)').item.json.first_name }}"
+            }
+          }
+        },
+        "requestOptions": {}
+      },
+      "id": "sendReminder2",
+      "name": "Enviar segundo recordatorio",
+      "type": "n8n-nodes-base.sendInBlue",
+      "typeVersion": 1,
+      "position": [
+        3312,
+        -304
+      ],
+      "credentials": {
+        "sendInBlueApi": {
+          "id": "7P242ip6wmwOs29A",
+          "name": "Brevo account"
+        }
+      },
+      "notes": "Completar templateId con el ID de la plantilla del SEGUNDO recordatorio en Brevo (debe ser distinto del primero, que usa templateId=1)."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1",
+              "name": "workflow_name",
+              "type": "string",
+              "value": "={{ $workflow.name }}"
+            },
+            {
+              "id": "2",
+              "name": "event_type",
+              "type": "string",
+              "value": "reminder_2_sent"
+            },
+            {
+              "id": "3",
+              "name": "status",
+              "type": "string",
+              "value": "success"
+            },
+            {
+              "id": "4",
+              "name": "customer_email",
+              "type": "string",
+              "value": "={{ $('Carrito Abandonado (Trigger)').item.json.body.email }}"
+            },
+            {
+              "id": "5",
+              "name": "entity_id",
+              "type": "string",
+              "value": "={{ $('Carrito Abandonado (Trigger)').item.json.body.cartId }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "setReminder2",
+      "name": "Preparar log: 2do recordatorio enviado",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3600,
+        -304
+      ],
+      "notes": "Arma el evento 'reminder_2_sent' para el workflow central de logging."
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "R4v2eOi69VpEtte0",
+          "cachedResultName": "Monitoreo - Error Handler"
+        },
+        "mode": "each",
+        "options": {}
+      },
+      "id": "execReminder2",
+      "name": "Registrar: 2do recordatorio enviado",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        3904,
+        -304
+      ],
+      "notes": "Llama al workflow central de logging."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1",
+              "name": "workflow_name",
+              "type": "string",
+              "value": "={{ $workflow.name }}"
+            },
+            {
+              "id": "2",
+              "name": "event_type",
+              "type": "string",
+              "value": "already_converted"
+            },
+            {
+              "id": "3",
+              "name": "status",
+              "type": "string",
+              "value": "success"
+            },
+            {
+              "id": "4",
+              "name": "customer_email",
+              "type": "string",
+              "value": "={{ $('Carrito Abandonado (Trigger)').item.json.body.email }}"
+            },
+            {
+              "id": "5",
+              "name": "entity_id",
+              "type": "string",
+              "value": "={{ $('Carrito Abandonado (Trigger)').item.json.body.cartId }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "setRecovered1",
+      "name": "Preparar log: Ya estaba convertido",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1184,
+        -496
+      ],
+      "notes": "Arma el evento 'already_converted': el carrito YA estaba 'converted' en el 1er chequeo, antes de mandar cualquier recordatorio. No es una recuperación — nunca se le mandó nada."
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "R4v2eOi69VpEtte0",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/R4v2eOi69VpEtte0",
+          "cachedResultName": "Monitoreo - Error Handler"
+        },
+        "mode": "each",
+        "options": {}
+      },
+      "id": "execRecovered1",
+      "name": "Registrar: Ya estaba convertido",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        1472,
+        -496
+      ],
+      "notes": "Llama al workflow central de logging."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1",
+              "name": "workflow_name",
+              "type": "string",
+              "value": "={{ $workflow.name }}"
+            },
+            {
+              "id": "2",
+              "name": "event_type",
+              "type": "string",
+              "value": "purchase_recovered"
+            },
+            {
+              "id": "3",
+              "name": "status",
+              "type": "string",
+              "value": "success"
+            },
+            {
+              "id": "4",
+              "name": "customer_email",
+              "type": "string",
+              "value": "={{ $('Carrito Abandonado (Trigger)').item.json.body.email }}"
+            },
+            {
+              "id": "5",
+              "name": "entity_id",
+              "type": "string",
+              "value": "={{ $('Carrito Abandonado (Trigger)').item.json.body.cartId }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "setRecovered2",
+      "name": "Preparar log: Compra recuperada",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3312,
+        -64
+      ],
+      "notes": "Arma el evento 'purchase_recovered': el carrito estuvo 'active' (realmente abandonado), recibió el 1er recordatorio, y recién ahora se convirtió. Esta sí es una recuperación real."
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "R4v2eOi69VpEtte0",
+          "cachedResultName": "Monitoreo - Error Handler"
+        },
+        "mode": "each",
+        "options": {}
+      },
+      "id": "execRecovered2",
+      "name": "Registrar: Compra recuperada",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        3600,
+        -64
+      ],
+      "notes": "Llama al workflow central de logging."
+    }
+  ],
+  "pinData": {
+    "Carrito Abandonado (Trigger)": [
+      {
+        "json": {
+          "headers": {
+            "host": "n8n.my-n8n-automation.uk",
+            "user-agent": "PostmanRuntime/2.7.0",
+            "content-length": "97",
+            "accept": "*/*",
+            "accept-encoding": "gzip, br",
+            "cache-control": "no-cache",
+            "cdn-loop": "cloudflare; loops=1",
+            "cf-connecting-ip": "181.9.209.31",
+            "cf-ipcountry": "AR",
+            "cf-ray": "a41f37436a3a9294-EZE",
+            "cf-visitor": "{\"scheme\":\"https\"}",
+            "cf-warp-tag-id": "6de6e224-0a13-4438-b1ef-e588edf5c226",
+            "connection": "keep-alive",
+            "content-type": "application/json",
+            "cookie": "CF_AppSession=9f5726809b8ed775",
+            "postman-token": "5bc62004-8452-4246-b8e7-e8a73d7ce96a",
+            "x-forwarded-for": "181.9.209.31",
+            "x-forwarded-proto": "https"
+          },
+          "params": {},
+          "query": {},
+          "body": {
+            "cartId": "2d999d5c-eeda-43c5-ad7e-6340bbddf021",
+            "email": "ani.fb95+carrito01@gmail.com"
+          },
+          "webhookUrl": "https://n8n.my-n8n-automation.uk/webhook/abandoned-cart",
+          "executionMode": "production"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Carrito Abandonado (Trigger)": {
+      "main": [
+        [
+          {
+            "node": "Esperar 1 hora",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Esperar 1 hora": {
+      "main": [
+        [
+          {
+            "node": "Verificar si hubo compra",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verificar si hubo compra": {
+      "main": [
+        [
+          {
+            "node": "¿Hubo compra?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Hubo compra?": {
+      "main": [
+        [
+          {
+            "node": "Preparar log: Ya estaba convertido",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Actualizar segmento Brevo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Actualizar segmento Brevo": {
+      "main": [
+        [
+          {
+            "node": "Enviar recordatorio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar recordatorio": {
+      "main": [
+        [
+          {
+            "node": "Preparar log: Recordatorio enviado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar log: Recordatorio enviado": {
+      "main": [
+        [
+          {
+            "node": "Registrar: Recordatorio enviado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar: Recordatorio enviado": {
+      "main": [
+        [
+          {
+            "node": "Esperar 48 horas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Esperar 48 horas": {
+      "main": [
+        [
+          {
+            "node": "Verificar si hubo compra (2do intento)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verificar si hubo compra (2do intento)": {
+      "main": [
+        [
+          {
+            "node": "¿Hubo compra? (2do intento)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Hubo compra? (2do intento)": {
+      "main": [
+        [
+          {
+            "node": "Preparar log: Compra recuperada",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Enviar segundo recordatorio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar segundo recordatorio": {
+      "main": [
+        [
+          {
+            "node": "Preparar log: 2do recordatorio enviado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar log: 2do recordatorio enviado": {
+      "main": [
+        [
+          {
+            "node": "Registrar: 2do recordatorio enviado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar log: Ya estaba convertido": {
+      "main": [
+        [
+          {
+            "node": "Registrar: Ya estaba convertido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar log: Compra recuperada": {
+      "main": [
+        [
+          {
+            "node": "Registrar: Compra recuperada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true,
+    "errorWorkflow": "R4v2eOi69VpEtte0"
+  },
+  "versionId": "6730551f-b241-45ef-bcfd-7aff778d5016",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "38ee23dda673260744c1d583e276366dc7fe027add2b91549715a7f87ae733f9"
+  },
+  "nodeGroups": [],
+  "id": "AI788YbVbROTyzt9",
+  "tags": []
+}
