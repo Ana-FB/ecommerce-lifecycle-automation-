@@ -46,7 +46,7 @@ flowchart LR
 * Después de 48 horas vuelve a comprobar el carrito.
 * Envía un segundo recordatorio únicamente si continúa pendiente.
 
-![Abandoned Cart](<img width="1235" height="726" alt="image" src="https://github.com/user-attachments/assets/ee8c8e4e-fec0-4dad-b2e1-5ded1fa1669b" />
+(<img width="1235" height="726" alt="image" src="https://github.com/user-attachments/assets/ee8c8e4e-fec0-4dad-b2e1-5ded1fa1669b" />
 )
 
 ### 📦 Post-Purchase
@@ -58,7 +58,7 @@ flowchart LR
 * Después de 3 días consulta productos relacionados con las categorías compradas.
 * Envía una recomendación cuando existen productos disponibles.
 
-![Post Purchase](<img width="1235" height="726" alt="image" src="https://github.com/user-attachments/assets/7e2187c9-290b-48b9-960c-5f6e66a86846" />
+(<img width="1235" height="726" alt="image" src="https://github.com/user-attachments/assets/7e2187c9-290b-48b9-960c-5f6e66a86846" />
 )
 
 ### 🔄 Reactivation / Win-back
@@ -78,7 +78,7 @@ Luego:
 3. Registra la fecha del envío en Supabase.
 4. Evita repetir automáticamente la misma campaña.
 
-![Reactivation](<img width="1235" height="726" alt="image" src="https://github.com/user-attachments/assets/b3a19628-819f-421f-b02f-a17e78ae5729" />
+(<img width="1235" height="726" alt="image" src="https://github.com/user-attachments/assets/b3a19628-819f-421f-b02f-a17e78ae5729" />
 )
 
 ### 📊 Monitoring
@@ -89,7 +89,7 @@ Los resultados y errores de los workflows se registran en:
 automation_logs
 ```
 
-![Monitoring](<img width="1235" height="726" alt="image" src="https://github.com/user-attachments/assets/9c438979-3bfe-4655-af12-26878c02f583" />
+(<img width="1235" height="726" alt="image" src="https://github.com/user-attachments/assets/9c438979-3bfe-4655-af12-26878c02f583" />
 )
 
 ---
