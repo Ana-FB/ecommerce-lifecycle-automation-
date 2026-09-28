@@ -155,8 +155,6 @@ La arquitectura puede adaptarse a una implementación real conectando los workfl
 
 **AI Automation Specialist | Data Engineer Junior | AI Engineer en formación | BI & Data Analytics**
 
-📍 Buenos Aires, Argentina
-
 🔗 [Portfolio](https://portafolio-anaferreira.vercel.app/)
 💻 [GitHub](https://github.com/Ana-FB)
 💼 [LinkedIn](TU_LINKEDIN)
