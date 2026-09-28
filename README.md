@@ -163,6 +163,6 @@ La arquitectura puede adaptarse a una implementación real conectando los workfl
 
 ### Especialidades
 
-`AI Automation` · `Marketing Automation` · `Data Engineering` · `Data Analytics` · `Python` · `SQL` · `n8n` · `APIs & Webhooks`
+`AI Automation`  · `Data Engineering` · `Data Analytics` · `Python` · `SQL` · `n8n` · `APIs & Webhooks`
 
 
