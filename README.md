@@ -110,7 +110,7 @@ La solución utiliza:
 
 Las recomendaciones utilizan la relación entre `order_items` y `products` para identificar productos de categorías relacionadas.
 
-![Database](docs/images/database-schema.png)
+<img width="911" height="633" alt="image" src="https://github.com/user-attachments/assets/d5da8872-d754-451c-9543-cf4a65896d12" />
 
 ---
 
