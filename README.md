@@ -1,4 +1,4 @@
-# Demo de automatización del ciclo de vida de clientes para e-commerce
+# Automatización del ciclo de vida de clientes para e-commerce
 
 Una demo de marketing automation que conecta **n8n**, **Supabase (PostgreSQL)** y **Brevo** para acompañar al cliente desde que deja productos en el carrito hasta la compra y la reactivación.
 
