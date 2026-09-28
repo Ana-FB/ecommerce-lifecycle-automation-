@@ -19,32 +19,8 @@ Sistema de automatización de marketing lifecycle para e-commerce, construido co
 
 ## 🗺️ Arquitectura general
 
-```mermaid
-flowchart LR
-    subgraph Triggers
-        A[Carrito creado] --> WF1
-        B[Compra confirmada] --> WF2
-        C[Cron diario 9am] --> WF3
-    end
-
-    WF1[Abandoned Cart] -->|reporta eventos| HUB
-    WF2[Post-Purchase] -->|reporta eventos| HUB
-    WF3[Reactivation] -->|reporta eventos| HUB
-    WF1 -.->|error| HUB
-    WF2 -.->|error| HUB
-    WF3 -.->|error| HUB
-
-    HUB[Monitoreo - Error Handler] --> LOGS[(automation_logs)]
-
-    LOGS --> VSTATUS[[v_workflow_status]]
-    LOGS --> VMETRICS[[v_dashboard_metrics]]
-    VSTATUS --> LOOKER[Looker Studio]
-    VMETRICS --> LOOKER
-
-    WF1 <--> BREVO[Brevo]
-    WF2 <--> BREVO
-    WF3 <--> BREVO
-```
+<!-- 📸 ESPACIO PARA CAPTURA: diagrama de arquitectura general del sistema -->
+![Arquitectura general](./docs/images/architecture-diagram.png)
 
 - **3 workflows de negocio** (Abandoned Cart, Post-Purchase, Reactivation) manejan la lógica de cada etapa del lifecycle.
 - **1 workflow central de logging** ("Monitoreo - Error Handler") recibe los eventos de los otros 3 (éxitos y errores) y los guarda en **una sola tabla** de Postgres.
