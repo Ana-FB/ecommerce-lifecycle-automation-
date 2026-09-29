@@ -102,7 +102,8 @@ Panel de monitoreo conectado en vivo a Supabase (PostgreSQL), con:
 * **Efectividad de las automatizaciones**: de los emails enviados en cada evento, cuántos terminaron en una compra.
 * **Historial de eventos**: actividad reciente registrada por los 3 workflows.
 
-<img width="475" height="503" alt="image" src="https://github.com/user-attachments/assets/93e2302a-301c-43cb-a107-d9b18ef3f8f9" />
+<img width="657" height="697" alt="image" src="https://github.com/user-attachments/assets/aba8881f-b461-4e09-bd01-dd537ef86ec5" />
+
 
 ---
 
