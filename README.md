@@ -151,13 +151,13 @@ Las recomendaciones utilizan la relación entre `order_items` y `products` para 
 
 ## 📌 Alcance
 
-Demo funcional desarrollada con **datos de prueba**.
+Demo funcional desarrollada con **datos de prueba**, simulados mediante Postman.
 
-Postman simula los eventos que en una implementación real podrían provenir directamente de la plataforma de e-commerce.
+El dashboard sí muestra métricas de efectividad (recordatorios enviados, tasa de conversión, recomendaciones aceptadas, etc.), pero corresponden a eventos de prueba generados manualmente — no a tráfico real de una tienda. El objetivo es demostrar la **capacidad de trazabilidad y medición** del sistema, no representar resultados comerciales reales.
 
-No se presentan métricas de conversión, revenue o impacto comercial, ya que la demo no utiliza tráfico real de una tienda.
+En una implementación real, conectando los workflows con la plataforma de e-commerce y tráfico genuino de clientes, estas mismas vistas y el mismo dashboard reflejarían métricas de negocio reales sin necesidad de cambios en la arquitectura.
 
-La arquitectura puede adaptarse a una implementación real conectando los workflows con la plataforma, APIs y reglas de negocio del cliente.
+Esto deja claro que la infraestructura de medición es real y funcional, solo que corrida con datos de prueba en vez de tráfico real — que es justo el punto fuerte que querés mostrar (que el sistema mide, no que los números sean reales).
 
 ---
 
