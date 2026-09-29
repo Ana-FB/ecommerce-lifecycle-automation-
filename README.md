@@ -91,6 +91,18 @@ automation_logs
 
 <img width="1235" height="726" alt="image" src="https://github.com/user-attachments/assets/9c438979-3bfe-4655-af12-26878c02f583" />
 
+---
+
+## 📊 Dashboard de Métricas (Looker Studio)
+
+Panel de monitoreo conectado en vivo a Supabase (PostgreSQL), con:
+
+* **Estado de los workflows**: última ejecución de cada automatización (éxito/error).
+* **Funnel de clientes**: cuántos están en cada etapa (carrito abandonado, cliente, reactivación en curso, reactivado).
+* **Efectividad de las automatizaciones**: de los emails enviados en cada evento, cuántos terminaron en una compra.
+* **Historial de eventos**: actividad reciente registrada por los 3 workflows.
+
+<img width="475" height="503" alt="image" src="https://github.com/user-attachments/assets/93e2302a-301c-43cb-a107-d9b18ef3f8f9" />
 
 ---
 
