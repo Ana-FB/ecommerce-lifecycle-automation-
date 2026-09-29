@@ -36,8 +36,7 @@
     },
     {
       "parameters": {
-        "amount": 1,
-        "unit": "hours"
+        "amount": 30
       },
       "id": "wait1",
       "name": "Esperar 1 hora",
@@ -48,7 +47,7 @@
         0
       ],
       "webhookId": "f1313de3-5861-45c9-a060-21d76921c1b9",
-      "notes": "Tiempo de espera antes de revisar si hubo compra. Ajustable (ej. 3h, 24h) según la estrategia."
+      "notes": "Tiempo de espera antes de revisar si hubo compra. Ajustable (ej. 3h, 24h) segun la estrategia."
     },
     {
       "parameters": {
@@ -151,7 +150,7 @@
           "name": "Brevo account"
         }
       },
-      "notes": "Create or Update. FUNNEL_STAGE = cart_abandoned reemplaza a STATUS_CART como atributo único de etapa del funnel."
+      "notes": "Create or Update. FUNNEL_STAGE = cart_abandoned reemplaza a STATUS_CART como atributo unico de etapa del funnel."
     },
     {
       "parameters": {
@@ -254,8 +253,7 @@
     },
     {
       "parameters": {
-        "amount": 48,
-        "unit": "hours"
+        "amount": 20
       },
       "id": "wait2",
       "name": "Esperar 48 horas",
@@ -292,7 +290,7 @@
           "name": "Postgres account"
         }
       },
-      "notes": "Segunda consulta del carrito, 48h después del primer email."
+      "notes": "Segunda consulta del carrito, 48h despues del primer email."
     },
     {
       "parameters": {
@@ -326,7 +324,7 @@
         3008,
         -176
       ],
-      "notes": "Mismo chequeo que el primer If, pero 48h después del 1er recordatorio. Sí → se convirtió mientras esperaba (recuperación real), termina. No → manda el 2do recordatorio."
+      "notes": "Mismo chequeo que el primer If, pero 48h despues del 1er recordatorio. Si -> se convirtio mientras esperaba (recuperacion real), termina. No -> manda el 2do recordatorio."
     },
     {
       "parameters": {
@@ -473,7 +471,7 @@
         1184,
         -496
       ],
-      "notes": "Arma el evento 'already_converted': el carrito YA estaba 'converted' en el 1er chequeo, antes de mandar cualquier recordatorio. No es una recuperación — nunca se le mandó nada."
+      "notes": "Arma el evento 'already_converted': el carrito YA estaba 'converted' en el 1er chequeo, antes de mandar cualquier recordatorio. No es una recuperacion, nunca se le mando nada."
     },
     {
       "parameters": {
@@ -543,7 +541,7 @@
         3312,
         -64
       ],
-      "notes": "Arma el evento 'purchase_recovered': el carrito estuvo 'active' (realmente abandonado), recibió el 1er recordatorio, y recién ahora se convirtió. Esta sí es una recuperación real."
+      "notes": "Arma el evento 'purchase_recovered': el carrito estuvo 'active' (realmente abandonado), recibio el 1er recordatorio, y recien ahora se convirtio. Esta si es una recuperacion real."
     },
     {
       "parameters": {
@@ -797,7 +795,7 @@
     "saveExecutionProgress": true,
     "errorWorkflow": "R4v2eOi69VpEtte0"
   },
-  "versionId": "6730551f-b241-45ef-bcfd-7aff778d5016",
+  "versionId": "9f48f18e-fd26-47d8-9e54-00832f752370",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "38ee23dda673260744c1d583e276366dc7fe027add2b91549715a7f87ae733f9"

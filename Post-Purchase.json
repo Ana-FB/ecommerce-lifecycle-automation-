@@ -3,7 +3,7 @@
   "nodes": [
     {
       "parameters": {
-        "content": "## 🎉 Post-Purchase\n\nSe dispara cuando llega la confirmación de una compra. Actualiza todo en Supabase y Brevo, y arma la secuencia de emails post-compra.\n\n**Flujo:**\n1. Marca el carrito de origen como `converted` en Supabase\n2. Calcula los totales reales (orden y carrito) por SQL, sin depender de datos mandados a mano\n3. Consulta el contacto en Brevo para saber si venía de una campaña de reactivación (`winback_sent`)\n   - Sí → lo marca `FUNNEL_STAGE = reactivated`\n   - No → lo marca `FUNNEL_STAGE = customer`\n4. Envía el email de confirmación de compra\n5. Espera 3 días → busca productos recomendados de la misma categoría que aún no compró\n6. Si hay recomendaciones → las envía por HTTP a la API de Brevo (con imágenes y precios reales)\n\nTodos los eventos se reportan a **\"Monitoreo - Error Handler\"**.",
+        "content": "## 🎉 Post-Purchase\n\nSe dispara cuando llega la confirmación de una compra. Actualiza todo en Supabase y Brevo, y arma la secuencia de emails post-compra.\n\n**Flujo:**\n1. Marca el carrito de origen como `converted` en Supabase\n2. Calcula los totales reales (orden y carrito) por SQL, sin depender de datos mandados a mano\n3. Marca a customers.last_purchase_at = NOW() (necesario para que el funnel del dashboard lo cuente como customer/reactivated)\n4. Consulta el contacto en Brevo para saber si venía de una campaña de reactivación (`winback_sent`)\n   - Sí → lo marca `FUNNEL_STAGE = reactivated`\n   - No → lo marca `FUNNEL_STAGE = customer`\n5. Envía el email de confirmación de compra\n6. Espera 3 días → busca productos recomendados de la misma categoría que aún no compró\n7. Si hay recomendaciones → las envía por HTTP a la API de Brevo (con imágenes y precios reales)\n\nTodos los eventos se reportan a **\"Monitoreo - Error Handler\"**.",
         "height": 540,
         "width": 800,
         "color": 5
@@ -13,8 +13,8 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        -48,
-        -656
+        -80,
+        -688
       ]
     },
     {
@@ -28,7 +28,7 @@
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
       "position": [
-        -48,
+        -256,
         0
       ],
       "webhookId": "898d6d4d-daf0-49aa-a8ad-4fb31d40bb33",
@@ -49,7 +49,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        176,
+        -48,
         0
       ],
       "credentials": {
@@ -74,7 +74,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [
-        368,
+        160,
         0
       ],
       "alwaysOutputData": true,
@@ -85,6 +85,32 @@
         }
       },
       "notes": "Calcula order_total (de orders.total) y cart_total (suma de cart_items.quantity * unit_price) en vez de depender de un valor mandado a mano por Postman."
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE public.customers\nSET last_purchase_at = NOW()\nWHERE id = (\n  SELECT customer_id\n  FROM public.orders\n  WHERE id = $1::uuid\n)\nRETURNING id, first_name, last_name, last_purchase_at;",
+        "options": {
+          "queryBatching": "independently",
+          "queryReplacement": "={{ [ $('Compra Realizada (Trigger)').first().json.body.orderId ] }}"
+        }
+      },
+      "id": "updateLastPurchase",
+      "name": "Actualizar last_purchase_at",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        368,
+        0
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "nnOMYtF34tQYfTC2",
+          "name": "Postgres account"
+        }
+      },
+      "notes": "Marca al cliente como comprador real (necesario para el funnel del dashboard) y de paso trae first_name/last_name reales de Supabase, para poder completar NOMBRE/APELLIDOS en Brevo mas adelante sin depender de lo que mande Postman."
     },
     {
       "parameters": {
@@ -107,7 +133,8 @@
           "name": "Brevo account"
         }
       },
-      "notes": "Trae los atributos actuales del contacto, para saber si estaba en estado 'winback_sent' (le mandamos la campaña de reactivación)."
+      "onError": "continueRegularOutput",
+      "notes": "Trae los atributos actuales del contacto para saber si venia de 'winback_sent'. Si el contacto no existe todavia (cliente nuevo que compra directo, sin pasar por Abandoned Cart), sigue el flujo igual gracias a onError=continueRegularOutput -- se trata como 'no es reactivacion'."
     },
     {
       "parameters": {
@@ -121,7 +148,7 @@
           "conditions": [
             {
               "id": "c1",
-              "leftValue": "={{ $json.attributes.FUNNEL_STAGE }}",
+              "leftValue": "={{ ($json.attributes || {}).FUNNEL_STAGE }}",
               "rightValue": "winback_sent",
               "operator": {
                 "type": "string",
@@ -141,7 +168,7 @@
         752,
         0
       ],
-      "notes": "Compara el FUNNEL_STAGE que tenía el contacto en Brevo ANTES de esta compra. Si era 'winback_sent' → esta compra es una reactivación. Si no (vacío, cart_abandoned, customer, etc.) → es una compra normal."
+      "notes": "Compara el FUNNEL_STAGE que tenia el contacto en Brevo ANTES de esta compra. Si el nodo anterior fallo (contacto nuevo, no existe), $json.attributes es undefined -- el fallback '|| {}' evita el error y cae en la rama 'No' (customer), que es lo correcto."
     },
     {
       "parameters": {
@@ -213,6 +240,14 @@
         "upsertAttributes": {
           "upsertAttributesValues": [
             {
+              "fieldName": "NOMBRE",
+              "fieldValue": "={{ $('Actualizar last_purchase_at').first().json.first_name }}"
+            },
+            {
+              "fieldName": "APELLIDOS",
+              "fieldValue": "={{ $('Actualizar last_purchase_at').first().json.last_name }}"
+            },
+            {
               "fieldName": "CART_TOTAL",
               "fieldValue": "={{ $('Consultar totales').first().json.cart_total }}"
             },
@@ -238,7 +273,7 @@
           "name": "Brevo account"
         }
       },
-      "notes": "Create or Update: no falla si el contacto ya existe. CART_TOTAL y ORDER_TOTAL vienen calculados por Postgres."
+      "notes": "Create or Update: no falla si el contacto ya existe. NOMBRE/APELLIDOS vienen de customers (Supabase), CART_TOTAL/ORDER_TOTAL de Postgres -- asi funciona igual para un cliente que nunca paso por Abandoned Cart."
     },
     {
       "parameters": {
@@ -266,8 +301,7 @@
     },
     {
       "parameters": {
-        "amount": 3,
-        "unit": "days"
+        "amount": 3
       },
       "id": "wait1",
       "name": "Esperar 3 días",
@@ -283,7 +317,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "WITH datos_de_orden AS (\n  SELECT\n    orders.id AS order_id,\n    customers.email,\n    customers.first_name,\n    orders.total AS order_total\n  FROM public.orders AS orders\n  JOIN public.customers AS customers\n    ON customers.id = orders.customer_id\n  WHERE orders.id = $1::uuid\n),\n\ncategorias_compradas AS (\n  SELECT DISTINCT\n    products.category\n  FROM public.order_items AS order_items\n  JOIN datos_de_orden\n    ON datos_de_orden.order_id = order_items.order_id\n  JOIN public.products AS products\n    ON products.id = order_items.product_id\n  WHERE order_items.product_id IS NOT NULL\n),\n\nproductos_recomendados AS (\n  SELECT\n    products.product_name,\n    products.price,\n    products.image_url,\n    ROW_NUMBER() OVER (\n      ORDER BY products.product_name\n    ) AS posicion\n  FROM public.products AS products\n  WHERE products.active = true\n    AND products.stock > 0\n    AND products.category IN (\n      SELECT categorias_compradas.category\n      FROM categorias_compradas\n    )\n    AND NOT EXISTS (\n      SELECT 1\n      FROM public.order_items AS order_items\n      JOIN datos_de_orden\n        ON datos_de_orden.order_id = order_items.order_id\n      WHERE order_items.product_id = products.id\n    )\n)\n\nSELECT\n  datos_de_orden.email,\n  datos_de_orden.first_name,\n  datos_de_orden.order_total,\n  COALESCE(\n    (\n      SELECT JSONB_AGG(\n        JSONB_BUILD_OBJECT(\n          'name', productos_recomendados.product_name,\n          'price', productos_recomendados.price,\n          'image_url', productos_recomendados.image_url\n        )\n        ORDER BY productos_recomendados.posicion\n      )\n      FROM productos_recomendados\n      WHERE productos_recomendados.posicion <= 3\n    ),\n    '[]'::jsonb\n  ) AS recommendations\nFROM datos_de_orden;\n\n",
+        "query": "WITH datos_de_orden AS (\n  SELECT\n    orders.id AS order_id,\n    customers.email,\n    customers.first_name,\n    orders.total AS order_total\n  FROM public.orders AS orders\n  JOIN public.customers AS customers\n    ON customers.id = orders.customer_id\n  WHERE orders.id = $1::uuid\n),\n\ncategorias_compradas AS (\n  SELECT DISTINCT\n    products.category\n  FROM public.order_items AS order_items\n  JOIN datos_de_orden\n    ON datos_de_orden.order_id = order_items.order_id\n  JOIN public.products AS products\n    ON products.id = order_items.product_id\n  WHERE order_items.product_id IS NOT NULL\n),\n\nproductos_recomendados AS (\n  SELECT\n    products.product_name,\n    products.price,\n    products.image_url,\n    ROW_NUMBER() OVER (\n      ORDER BY products.product_name\n    ) AS posicion\n  FROM public.products AS products\n  WHERE products.active = true\n    AND products.stock > 0\n    AND products.category IN (\n      SELECT categorias_compradas.category\n      FROM categorias_compradas\n    )\n    AND NOT EXISTS (\n      SELECT 1\n      FROM public.order_items AS order_items\n      JOIN datos_de_orden\n        ON datos_de_orden.order_id = order_items.order_id\n      WHERE order_items.product_id = products.id\n    )\n)\n\nSELECT\n  datos_de_orden.email,\n  datos_de_orden.first_name,\n  datos_de_orden.order_total,\n  COALESCE(\n    (\n      SELECT JSONB_AGG(\n        JSONB_BUILD_OBJECT(\n          'name', productos_recomendados.product_name,\n          'price', productos_recomendados.price,\n          'image_url', productos_recomendados.image_url\n        )\n        ORDER BY productos_recomendados.posicion\n      )\n      FROM productos_recomendados\n      WHERE productos_recomendados.posicion <= 3\n    ),\n    '[]'::jsonb\n  ) AS recommendations\nFROM datos_de_orden;\n",
         "options": {
           "queryBatching": "independently",
           "queryReplacement": "={{ $('Compra Realizada (Trigger)').item.json.body.orderId }}"
@@ -394,7 +428,7 @@
               "id": "4",
               "name": "customer_email",
               "type": "string",
-              "value": "={{ $json.email }}"
+              "value": "={{ $('Consultar productos de la orden').item.json.email }}"
             },
             {
               "id": "5",
@@ -414,7 +448,7 @@
         2720,
         -144
       ],
-      "notes": "Arma el evento 'recommendation_sent' para el workflow central de logging."
+      "notes": "Arma el evento 'recommendation_sent'. customer_email viene de 'Consultar productos de la orden' (no del nodo HTTP anterior, que solo devuelve el messageId sin email)."
     },
     {
       "parameters": {
@@ -519,23 +553,23 @@
             "accept-encoding": "gzip, br",
             "cache-control": "no-cache",
             "cdn-loop": "cloudflare; loops=1",
-            "cf-connecting-ip": "181.9.209.31",
+            "cf-connecting-ip": "190.229.180.58",
             "cf-ipcountry": "AR",
-            "cf-ray": "a41f7d28ac678f28-EZE",
+            "cf-ray": "a427cb616d142ee2-EZE",
             "cf-visitor": "{\"scheme\":\"https\"}",
             "cf-warp-tag-id": "6de6e224-0a13-4438-b1ef-e588edf5c226",
             "connection": "keep-alive",
             "content-type": "application/json",
             "cookie": "CF_AppSession=9f5726809b8ed775",
-            "postman-token": "870f58ce-cdbd-4c69-aa07-62b5776b9a37",
-            "x-forwarded-for": "181.9.209.31",
+            "postman-token": "2546f5c5-ae30-43be-80f9-96bc68450f4e",
+            "x-forwarded-for": "190.229.180.58",
             "x-forwarded-proto": "https"
           },
           "params": {},
           "query": {},
           "body": {
-            "orderId": "8cf49570-47ad-4e7a-9195-994044700b6c",
-            "email": "ani.fb95+carrito01@gmail.com"
+            "orderId": "046a271c-c8a8-4290-a057-7922b99cd6fe",
+            "email": "ani.fb95+carrito04@gmail.com"
           },
           "webhookUrl": "https://n8n.my-n8n-automation.uk/webhook/purchase-completed",
           "executionMode": "production"
@@ -570,6 +604,17 @@
       ]
     },
     "Consultar totales": {
+      "main": [
+        [
+          {
+            "node": "Actualizar last_purchase_at",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Actualizar last_purchase_at": {
       "main": [
         [
           {
@@ -737,7 +782,7 @@
     "saveExecutionProgress": true,
     "errorWorkflow": "R4v2eOi69VpEtte0"
   },
-  "versionId": "2bcf6c1a-9365-4564-ba6f-ad880179c75c",
+  "versionId": "18576a91-1c5c-4fcb-9211-2cb6bf1de866",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "38ee23dda673260744c1d583e276366dc7fe027add2b91549715a7f87ae733f9"
