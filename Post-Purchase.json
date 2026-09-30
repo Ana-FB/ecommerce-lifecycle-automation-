@@ -301,7 +301,8 @@
     },
     {
       "parameters": {
-        "amount": 3
+        "amount": 3,
+        "unit": "days"
       },
       "id": "wait1",
       "name": "Esperar 3 días",
@@ -555,21 +556,21 @@
             "cdn-loop": "cloudflare; loops=1",
             "cf-connecting-ip": "190.229.180.58",
             "cf-ipcountry": "AR",
-            "cf-ray": "a427cb616d142ee2-EZE",
+            "cf-ray": "a42d9dd46a0a94f5-EZE",
             "cf-visitor": "{\"scheme\":\"https\"}",
             "cf-warp-tag-id": "6de6e224-0a13-4438-b1ef-e588edf5c226",
             "connection": "keep-alive",
             "content-type": "application/json",
             "cookie": "CF_AppSession=9f5726809b8ed775",
-            "postman-token": "2546f5c5-ae30-43be-80f9-96bc68450f4e",
+            "postman-token": "1cce68b0-dad7-4741-8a85-c0901acc8990",
             "x-forwarded-for": "190.229.180.58",
             "x-forwarded-proto": "https"
           },
           "params": {},
           "query": {},
           "body": {
-            "orderId": "046a271c-c8a8-4290-a057-7922b99cd6fe",
-            "email": "ani.fb95+carrito04@gmail.com"
+            "orderId": "1c08e043-bdf1-4e32-a45f-5b734b1a324b",
+            "email": "ani.fb95+carrito07@gmail.com"
           },
           "webhookUrl": "https://n8n.my-n8n-automation.uk/webhook/purchase-completed",
           "executionMode": "production"
@@ -782,7 +783,7 @@
     "saveExecutionProgress": true,
     "errorWorkflow": "R4v2eOi69VpEtte0"
   },
-  "versionId": "18576a91-1c5c-4fcb-9211-2cb6bf1de866",
+  "versionId": "9a95533c-e677-4d0f-99f8-9d6008eaec9e",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "38ee23dda673260744c1d583e276366dc7fe027add2b91549715a7f87ae733f9"

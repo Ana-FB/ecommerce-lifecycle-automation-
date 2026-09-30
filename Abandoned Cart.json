@@ -36,7 +36,8 @@
     },
     {
       "parameters": {
-        "amount": 30
+        "amount": 1,
+        "unit": "hours"
       },
       "id": "wait1",
       "name": "Esperar 1 hora",
@@ -253,7 +254,8 @@
     },
     {
       "parameters": {
-        "amount": 20
+        "amount": 48,
+        "unit": "hours"
       },
       "id": "wait2",
       "name": "Esperar 48 horas",
@@ -577,23 +579,23 @@
             "accept-encoding": "gzip, br",
             "cache-control": "no-cache",
             "cdn-loop": "cloudflare; loops=1",
-            "cf-connecting-ip": "181.9.209.31",
+            "cf-connecting-ip": "190.229.180.58",
             "cf-ipcountry": "AR",
-            "cf-ray": "a41f37436a3a9294-EZE",
+            "cf-ray": "a42d2a178ff1f315-EZE",
             "cf-visitor": "{\"scheme\":\"https\"}",
             "cf-warp-tag-id": "6de6e224-0a13-4438-b1ef-e588edf5c226",
             "connection": "keep-alive",
             "content-type": "application/json",
             "cookie": "CF_AppSession=9f5726809b8ed775",
-            "postman-token": "5bc62004-8452-4246-b8e7-e8a73d7ce96a",
-            "x-forwarded-for": "181.9.209.31",
+            "postman-token": "3a15bc32-0deb-4c60-9a46-550f96efd901",
+            "x-forwarded-for": "190.229.180.58",
             "x-forwarded-proto": "https"
           },
           "params": {},
           "query": {},
           "body": {
-            "cartId": "2d999d5c-eeda-43c5-ad7e-6340bbddf021",
-            "email": "ani.fb95+carrito01@gmail.com"
+            "cartId": "923ad1e1-2f0d-4386-b19b-72011e5c276d",
+            "email": "ani.fb95+carrito06@gmail.com"
           },
           "webhookUrl": "https://n8n.my-n8n-automation.uk/webhook/abandoned-cart",
           "executionMode": "production"
@@ -795,7 +797,7 @@
     "saveExecutionProgress": true,
     "errorWorkflow": "R4v2eOi69VpEtte0"
   },
-  "versionId": "9f48f18e-fd26-47d8-9e54-00832f752370",
+  "versionId": "726a44fa-5761-46f6-82ee-df0ab1a3f616",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "38ee23dda673260744c1d583e276366dc7fe027add2b91549715a7f87ae733f9"
