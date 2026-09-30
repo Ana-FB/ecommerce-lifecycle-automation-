@@ -168,8 +168,6 @@ Esto deja claro que la infraestructura de medición es real y funcional, solo qu
 
 **AI Automation Specialist | Data Engineer Junior | AI Engineer en formación | BI & Data Analytics**
 
-🔗 [Portfolio](https://portafolio-anaferreira.vercel.app/)
-💻 [GitHub](https://github.com/Ana-FB)
 💼 [LinkedIn](TU_LINKEDIN)
 
 ### Especialidades
